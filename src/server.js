@@ -474,6 +474,10 @@ const serializeMessage = (message, conversationId = message.conversationId) => (
   senderName: message.senderId?.username,
   text: message.text,
   imageUrl: message.imageUrl,
+  mediaUrl: message.mediaUrl,
+  mediaType: message.mediaType,
+  mediaName: message.mediaName,
+  mediaSize: message.mediaSize,
   productRef: message.productRef?.title
     ? {
         productId: message.productRef.productId?.toString(),
@@ -1164,10 +1168,10 @@ const routes = {
 
   'POST /api/messages': async (request, response) => {
     const user = await requireAuth(request);
-    const { recipientId, text, imageUrl, productRef } = await parseBody(request);
+    const { recipientId, text, imageUrl, mediaUrl, mediaType, mediaName, mediaSize, productRef } = await parseBody(request);
 
-    if (!recipientId || !text) {
-      sendJson(response, 400, { message: 'recipientId and text are required.' });
+    if (!recipientId || (!text && !mediaUrl && !imageUrl)) {
+      sendJson(response, 400, { message: 'recipientId and message content are required.' });
       return;
     }
 
@@ -1179,8 +1183,12 @@ const routes = {
         senderId: user._id,
         receiverId: recipientId,
         senderRole: user.role,
-        text,
+        text: text || (mediaType === 'audio' ? 'Voice message' : mediaType === 'video' ? 'Video' : mediaType === 'image' ? 'Photo' : mediaName || 'Attachment'),
         imageUrl,
+        mediaUrl: mediaUrl || imageUrl,
+        mediaType: mediaType || (imageUrl ? 'image' : null),
+        mediaName,
+        mediaSize,
         productRef,
       });
 
@@ -1192,6 +1200,10 @@ const routes = {
         senderName: user.fullName || user.username,
         text: message.text,
         imageUrl: message.imageUrl,
+        mediaUrl: message.mediaUrl,
+        mediaType: message.mediaType,
+        mediaName: message.mediaName,
+        mediaSize: message.mediaSize,
         productRef: serializeMessage(message).productRef,
         editedAt: message.editedAt,
         deletedAt: message.deletedAt,

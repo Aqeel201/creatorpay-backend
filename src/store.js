@@ -360,7 +360,19 @@ const normalizeMessageProductRef = (productRef) => {
   };
 };
 
-const createMessage = ({ conversationId, senderId, receiverId, senderRole, text, imageUrl, productRef }) =>
+const createMessage = ({
+  conversationId,
+  senderId,
+  receiverId,
+  senderRole,
+  text,
+  imageUrl,
+  mediaUrl,
+  mediaType,
+  mediaName,
+  mediaSize,
+  productRef,
+}) =>
   Message.create({
     conversationId,
     senderId,
@@ -368,6 +380,10 @@ const createMessage = ({ conversationId, senderId, receiverId, senderRole, text,
     senderRole,
     text: text.trim(),
     imageUrl: imageUrl?.trim(),
+    mediaUrl: mediaUrl?.trim(),
+    mediaType: ['image', 'video', 'audio', 'file'].includes(mediaType) ? mediaType : null,
+    mediaName: mediaName?.trim(),
+    mediaSize: Number.isFinite(Number(mediaSize)) ? Number(mediaSize) : undefined,
     productRef: normalizeMessageProductRef(productRef),
   });
 
