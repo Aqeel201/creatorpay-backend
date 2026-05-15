@@ -8,12 +8,14 @@ const signPayload = (payload) =>
   createHmac('sha256', getSecret()).update(payload).digest('base64url');
 
 const createAuthToken = (user) => {
+  const tokenLifetimeMs = Number(process.env.AUTH_TOKEN_TTL_MS) || 365 * 24 * 60 * 60 * 1000;
   const payload = toBase64Url(
     JSON.stringify({
       sub: user._id.toString(),
       role: user.role,
       verified: Boolean(user.isVerified),
-      exp: Date.now() + 7 * 24 * 60 * 60 * 1000,
+      exp: Date.now() + tokenLifetimeMs,
+      iat: Date.now(),
     })
   );
 

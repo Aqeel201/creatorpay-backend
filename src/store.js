@@ -173,6 +173,9 @@ const setResetToken = (email, resetToken) =>
     { new: true }
   );
 
+const findUserByResetToken = (resetToken) =>
+  CreatorPayCredential.findOne({ resetToken }).select('+resetToken');
+
 const updatePassword = (email, password) =>
   CreatorPayCredential.findOneAndUpdate(
     { email: normalizeEmail(email) },
@@ -461,6 +464,7 @@ module.exports = {
   linkGoogleAccount,
   registerPushToken,
   setResetToken,
+  findUserByResetToken,
   updatePassword,
   upgradePasswordHash,
   // Product functions

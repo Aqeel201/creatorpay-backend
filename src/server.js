@@ -28,6 +28,8 @@ const {
   sanitizePendingSignup,
   sanitizeUser,
   setResetToken,
+  findUserByResetToken,
+  updatePassword,
   upgradePasswordHash,
   createGoogleUser,
   linkGoogleAccount,
@@ -97,9 +99,22 @@ const sendJson = (response, statusCode, payload) => {
   response.end(JSON.stringify(payload));
 };
 
+const sendHtml = (response, statusCode, html) => {
+  response.writeHead(statusCode, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Access-Control-Allow-Origin': '*',
+  });
+  response.end(html);
+};
+
 const getRoutePath = (requestUrl) => {
   const path = requestUrl.split('?')[0] || '/';
   return path.length > 1 ? path.replace(/\/+$/, '') : path;
+};
+
+const getQueryParams = (requestUrl) => {
+  const baseUrl = getPublicBaseUrl();
+  return new URL(requestUrl, baseUrl).searchParams;
 };
 
 const matchRoute = (method, routePath) => {
@@ -343,9 +358,12 @@ const sendOtpEmail = async (email, otp, fullName) => {
   }
 };
 
+const getPublicBaseUrl = () =>
+  (process.env.APP_BASE_URL || process.env.PUBLIC_BASE_URL || 'https://creatorpay-backend.vercel.app').replace(/\/+$/, '');
+
 const sendResetPasswordEmail = async (email, fullName, resetToken) => {
   try {
-    const resetLink = `${process.env.APP_BASE_URL || 'http://localhost:3000'}/reset-password?token=${resetToken}`;
+    const resetLink = `${getPublicBaseUrl()}/reset-password?token=${resetToken}`;
     
     const response = await transporter.sendMail({
       from: process.env.GMAIL_USER,
@@ -978,6 +996,95 @@ const routes = {
       resetToken,
       emailSent: emailResult.success,
     });
+  },
+
+  'GET /reset-password': async (request, response) => {
+    const token = getQueryParams(request.url).get('token') || '';
+    const user = token ? await findUserByResetToken(token) : null;
+
+    if (!user) {
+      sendHtml(response, 404, `
+        <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>CreatorPay</title></head>
+        <body style="margin:0;font-family:Arial,sans-serif;background:#0f1117;color:#fff;display:grid;place-items:center;min-height:100vh;padding:24px">
+          <main style="max-width:440px;text-align:center">
+            <h1>Reset link expired</h1>
+            <p style="color:#aab2c0;line-height:1.5">Open CreatorPay and request a new password reset link.</p>
+          </main>
+        </body></html>
+      `);
+      return;
+    }
+
+    sendHtml(response, 200, `
+      <!doctype html>
+      <html>
+        <head>
+          <meta name="viewport" content="width=device-width,initial-scale=1">
+          <title>Reset CreatorPay Password</title>
+        </head>
+        <body style="margin:0;font-family:Arial,sans-serif;background:#0f1117;color:#fff;display:grid;place-items:center;min-height:100vh;padding:24px">
+          <main style="width:100%;max-width:440px;background:#171c24;border:1px solid #273140;border-radius:20px;padding:28px;box-sizing:border-box">
+            <h1 style="margin:0 0 8px;font-size:28px">Reset password</h1>
+            <p style="margin:0 0 22px;color:#aab2c0;line-height:1.5">Create a new password for ${user.email}.</p>
+            <form id="resetForm">
+              <input id="password" type="password" minlength="6" required placeholder="New password" style="width:100%;box-sizing:border-box;margin-bottom:12px;padding:15px;border-radius:12px;border:1px solid #344155;background:#0f1117;color:#fff;font-size:16px">
+              <input id="confirmPassword" type="password" minlength="6" required placeholder="Confirm password" style="width:100%;box-sizing:border-box;margin-bottom:16px;padding:15px;border-radius:12px;border:1px solid #344155;background:#0f1117;color:#fff;font-size:16px">
+              <button type="submit" style="width:100%;padding:15px;border:0;border-radius:12px;background:#36d1a8;color:#07110f;font-weight:700;font-size:16px">Update password</button>
+            </form>
+            <p id="message" style="min-height:22px;margin:16px 0 0;color:#aab2c0"></p>
+          </main>
+          <script>
+            const form = document.getElementById('resetForm');
+            const message = document.getElementById('message');
+            form.addEventListener('submit', async (event) => {
+              event.preventDefault();
+              const password = document.getElementById('password').value;
+              const confirmPassword = document.getElementById('confirmPassword').value;
+              if (password !== confirmPassword) {
+                message.textContent = 'Passwords do not match.';
+                message.style.color = '#ff9f9f';
+                return;
+              }
+              message.textContent = 'Updating password...';
+              message.style.color = '#aab2c0';
+              const res = await fetch('/api/auth/reset-password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: '${token}', password }),
+              });
+              const data = await res.json().catch(() => ({}));
+              if (!res.ok) {
+                message.textContent = data.message || 'Could not update password.';
+                message.style.color = '#ff9f9f';
+                return;
+              }
+              form.reset();
+              message.textContent = 'Password updated. You can now login in CreatorPay.';
+              message.style.color = '#36d1a8';
+            });
+          </script>
+        </body>
+      </html>
+    `);
+  },
+
+  'POST /api/auth/reset-password': async (request, response) => {
+    const { token, password } = await parseBody(request);
+
+    if (!token || !password || password.length < 6) {
+      sendJson(response, 400, { message: 'A valid reset token and 6 character password are required.' });
+      return;
+    }
+
+    const user = await findUserByResetToken(token);
+
+    if (!user) {
+      sendJson(response, 404, { message: 'Reset link is invalid or expired.' });
+      return;
+    }
+
+    await updatePassword(user.email, password);
+    sendJson(response, 200, { message: 'Password updated successfully.' });
   },
 
 
