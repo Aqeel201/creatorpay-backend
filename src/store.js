@@ -80,6 +80,53 @@ const registerPushToken = (userId, { token, platform }) =>
     )
   );
 
+const addUserSession = (userId, { sessionId, device, ip }) =>
+  CreatorPayCredential.findByIdAndUpdate(
+    userId,
+    {
+      $pull: { sessions: { sessionId } },
+    },
+    { new: true }
+  ).then(() =>
+    CreatorPayCredential.findByIdAndUpdate(
+      userId,
+      {
+        $push: {
+          sessions: {
+            $each: [{
+              sessionId,
+              device: device?.slice(0, 160) || 'Unknown device',
+              ip: ip?.slice(0, 80) || '',
+              createdAt: new Date(),
+              lastSeenAt: new Date(),
+            }],
+            $slice: -12,
+          },
+        },
+      },
+      { new: true }
+    )
+  );
+
+const touchUserSession = (userId, sessionId) => {
+  if (!sessionId) return Promise.resolve(null);
+
+  return CreatorPayCredential.updateOne(
+    { _id: userId, 'sessions.sessionId': sessionId },
+    { $set: { 'sessions.$.lastSeenAt': new Date() } }
+  );
+};
+
+const removeUserSession = (userId, sessionId) => {
+  if (!sessionId) return Promise.resolve(null);
+
+  return CreatorPayCredential.findByIdAndUpdate(
+    userId,
+    { $pull: { sessions: { sessionId } } },
+    { new: true }
+  );
+};
+
 const findUserByAnyIdentifier = (id) => {
   const clean = id.trim().toLowerCase();
   return CreatorPayCredential.findOne({
@@ -463,6 +510,9 @@ module.exports = {
   createGoogleUser,
   linkGoogleAccount,
   registerPushToken,
+  addUserSession,
+  touchUserSession,
+  removeUserSession,
   setResetToken,
   findUserByResetToken,
   updatePassword,

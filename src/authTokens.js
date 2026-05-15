@@ -7,11 +7,12 @@ const toBase64Url = (value) => Buffer.from(value).toString('base64url');
 const signPayload = (payload) =>
   createHmac('sha256', getSecret()).update(payload).digest('base64url');
 
-const createAuthToken = (user) => {
+const createAuthToken = (user, { sessionId } = {}) => {
   const tokenLifetimeMs = Number(process.env.AUTH_TOKEN_TTL_MS) || 365 * 24 * 60 * 60 * 1000;
   const payload = toBase64Url(
     JSON.stringify({
       sub: user._id.toString(),
+      sid: sessionId || null,
       role: user.role,
       verified: Boolean(user.isVerified),
       exp: Date.now() + tokenLifetimeMs,

@@ -34,6 +34,9 @@ const {
   createGoogleUser,
   linkGoogleAccount,
   registerPushToken,
+  addUserSession,
+  touchUserSession,
+  removeUserSession,
   // Product
   createProduct,
   findProductById,
@@ -191,6 +194,16 @@ const getBearerToken = (request) => {
   return scheme?.toLowerCase() === 'bearer' ? token : null;
 };
 
+const createSessionForUser = async (user, request) => {
+  const sessionId = randomUUID();
+  await addUserSession(user._id, {
+    sessionId,
+    device: request.headers['user-agent'] || 'CreatorPay mobile app',
+    ip: request.headers['x-forwarded-for'] || request.socket?.remoteAddress || '',
+  });
+  return sessionId;
+};
+
 const requireAuth = async (request, { role } = {}) => {
   const tokenPayload = verifyAuthToken(getBearerToken(request));
 
@@ -221,6 +234,8 @@ const requireAuth = async (request, { role } = {}) => {
   }
 
   request.user = user;
+  request.sessionId = tokenPayload.sid || null;
+  touchUserSession(user._id, tokenPayload.sid).catch(() => null);
   return user;
 };
 
@@ -784,10 +799,11 @@ const routes = {
     }
 
     console.log('✅ Login successful:', { userId: user._id, role: user.role });
+    const sessionId = await createSessionForUser(user, request);
     sendJson(response, 200, {
       message: 'Login successful.',
       user: sanitizeUser(user),
-      token: createAuthToken(user),
+      token: createAuthToken(user, { sessionId }),
       nextScreen: user.role === 'creator' ? 'CreatorDashboard' : 'FanHome',
     });
   },
@@ -843,11 +859,12 @@ const routes = {
     }
 
     await deletePendingSignup(email);
+    const sessionId = await createSessionForUser(user, request);
 
     sendJson(response, 200, {
       message: 'Google login successful.',
       user: sanitizeUser(user),
-      token: createAuthToken(user),
+      token: createAuthToken(user, { sessionId }),
       nextScreen: user.role === 'creator' ? 'CreatorDashboard' : 'FanHome',
     });
   },
@@ -932,11 +949,12 @@ const routes = {
     verifiedUser.isVerified = true;
     await verifiedUser.save();
     await deletePendingSignup(email);
+    const sessionId = await createSessionForUser(verifiedUser, request);
 
     sendJson(response, 200, {
       message: 'OTP verified successfully.',
       user: sanitizeUser(verifiedUser),
-      token: createAuthToken(verifiedUser),
+      token: createAuthToken(verifiedUser, { sessionId }),
       nextScreen: verifiedUser.role === 'creator' ? 'CreatorDashboard' : 'FanHome',
     });
   },
@@ -1751,6 +1769,39 @@ const routes = {
     } catch (error) {
       sendJson(response, 500, { message: error.message });
     }
+  },
+
+  'GET /api/auth/sessions': async (request, response) => {
+    const user = await requireAuth(request);
+    const sessions = [...(user.sessions || [])]
+      .sort((a, b) => new Date(b.lastSeenAt || b.createdAt) - new Date(a.lastSeenAt || a.createdAt))
+      .map((session) => ({
+        id: session.sessionId,
+        device: session.device || 'Unknown device',
+        ip: session.ip || '',
+        createdAt: session.createdAt,
+        lastSeenAt: session.lastSeenAt,
+        current: session.sessionId && request.sessionId && session.sessionId === request.sessionId,
+      }));
+
+    if (request.sessionId && !sessions.some((session) => session.current)) {
+      sessions.unshift({
+        id: request.sessionId,
+        device: request.headers['user-agent'] || 'CreatorPay mobile app',
+        ip: request.headers['x-forwarded-for'] || request.socket?.remoteAddress || '',
+        createdAt: null,
+        lastSeenAt: new Date(),
+        current: true,
+      });
+    }
+
+    sendJson(response, 200, { sessions });
+  },
+
+  'DELETE /api/auth/sessions/current': async (request, response) => {
+    const user = await requireAuth(request);
+    await removeUserSession(user._id, request.sessionId);
+    sendJson(response, 200, { message: 'Current session removed.' });
   },
 
   // ========== USER PROFILE APIs ==========

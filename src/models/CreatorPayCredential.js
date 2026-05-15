@@ -84,6 +84,28 @@ const creatorPayCredentialSchema = new mongoose.Schema(
         default: Date.now,
       },
     }],
+    sessions: [{
+      sessionId: {
+        type: String,
+        trim: true,
+      },
+      device: {
+        type: String,
+        trim: true,
+      },
+      ip: {
+        type: String,
+        trim: true,
+      },
+      createdAt: {
+        type: Date,
+        default: Date.now,
+      },
+      lastSeenAt: {
+        type: Date,
+        default: Date.now,
+      },
+    }],
   },
   {
     collection: 'creatorpay_credentials',
