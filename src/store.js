@@ -418,6 +418,33 @@ const findConversationMessages = (conversationId, limit = 50) =>
     .sort({ createdAt: 1 })
     .limit(limit);
 
+const findUndeliveredMessagesForUser = (userId) =>
+  Message.find({
+    receiverId: userId,
+    deliveredAt: null,
+    deletedAt: null,
+  });
+
+const markMessagesDelivered = (messageIds, deliveredAt = new Date()) =>
+  Message.updateMany(
+    { _id: { $in: messageIds }, deliveredAt: null },
+    { deliveredAt, updatedAt: Date.now() }
+  );
+
+const findUnreadConversationMessages = (conversationId, userId) =>
+  Message.find({
+    conversationId,
+    receiverId: userId,
+    isRead: false,
+    deletedAt: null,
+  });
+
+const markConversationMessagesRead = (messageIds, readAt = new Date()) =>
+  Message.updateMany(
+    { _id: { $in: messageIds }, isRead: false },
+    { isRead: true, readAt, deliveredAt: readAt, updatedAt: Date.now() }
+  );
+
 const findUserConversations = (userId) =>
   Message.aggregate([
     {
@@ -554,6 +581,10 @@ module.exports = {
   updateMessageText,
   deleteMessageForEveryone,
   findConversationMessages,
+  findUndeliveredMessagesForUser,
+  markMessagesDelivered,
+  findUnreadConversationMessages,
+  markConversationMessagesRead,
   findUserConversations,
   markMessageAsRead,
   // Review functions

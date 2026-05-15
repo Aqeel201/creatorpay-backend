@@ -58,6 +58,10 @@ const {
   updateMessageText,
   deleteMessageForEveryone,
   findConversationMessages,
+  findUndeliveredMessagesForUser,
+  markMessagesDelivered,
+  findUnreadConversationMessages,
+  markConversationMessagesRead,
   findUserConversations,
   markMessageAsRead,
   // Review
@@ -478,6 +482,7 @@ const serializeMessage = (message, conversationId = message.conversationId) => (
   mediaType: message.mediaType,
   mediaName: message.mediaName,
   mediaSize: message.mediaSize,
+  deliveredAt: message.deliveredAt,
   productRef: message.productRef?.title
     ? {
         productId: message.productRef.productId?.toString(),
@@ -488,6 +493,7 @@ const serializeMessage = (message, conversationId = message.conversationId) => (
       }
     : null,
   isRead: message.isRead,
+  readAt: message.readAt,
   editedAt: message.editedAt,
   deletedAt: message.deletedAt,
   createdAt: message.createdAt,
@@ -503,6 +509,47 @@ const emitMessageMutation = (message, eventName) => {
       realtime.to(socketId).emit(eventName, payload);
     }
   });
+};
+
+const emitMessageReceipt = (message, receipt) => {
+  if (!realtime || !message) return;
+
+  const payload = {
+    id: message._id.toString(),
+    conversationId: message.conversationId,
+    senderId: message.senderId?.toString(),
+    receiverId: message.receiverId?.toString(),
+    ...receipt,
+  };
+
+  [payload.senderId, payload.receiverId].forEach((id) => {
+    const socketId = connectedUsers.get(String(id));
+    if (socketId) {
+      realtime.to(socketId).emit('message:receipt', payload);
+    }
+  });
+};
+
+const markDeliveredForUser = async (userId) => {
+  const messages = await findUndeliveredMessagesForUser(userId);
+  if (messages.length === 0) return;
+
+  const deliveredAt = new Date();
+  await markMessagesDelivered(messages.map((message) => message._id), deliveredAt);
+  messages.forEach((message) => emitMessageReceipt(message, { deliveredAt }));
+};
+
+const markConversationSeen = async (conversationId, userId) => {
+  const messages = await findUnreadConversationMessages(conversationId, userId);
+  if (messages.length === 0) return;
+
+  const readAt = new Date();
+  await markConversationMessagesRead(messages.map((message) => message._id), readAt);
+  messages.forEach((message) => emitMessageReceipt(message, {
+    deliveredAt: message.deliveredAt || readAt,
+    readAt,
+    isRead: true,
+  }));
 };
 
 const sendPushNotifications = async (tokens = [], { title, body, data = {} }) => {
@@ -1192,6 +1239,11 @@ const routes = {
         productRef,
       });
 
+      if (connectedUsers.has(String(recipientId))) {
+        message.deliveredAt = new Date();
+        await message.save();
+      }
+
       const socketPayload = {
         id: message._id.toString(),
         conversationId,
@@ -1204,6 +1256,9 @@ const routes = {
         mediaType: message.mediaType,
         mediaName: message.mediaName,
         mediaSize: message.mediaSize,
+        deliveredAt: message.deliveredAt,
+        readAt: message.readAt,
+        isRead: message.isRead,
         productRef: serializeMessage(message).productRef,
         editedAt: message.editedAt,
         deletedAt: message.deletedAt,
@@ -1215,6 +1270,7 @@ const routes = {
 
       if (realtime && receiverSocketId) {
         realtime.to(receiverSocketId).emit('message:new', socketPayload);
+        emitMessageReceipt(message, { deliveredAt: message.deliveredAt });
       }
 
       if (realtime && senderSocketId) {
@@ -1726,6 +1782,7 @@ const routes = {
     const user = await requireAuth(request);
 
     try {
+      await markDeliveredForUser(user._id);
       const conversations = await findUserConversations(user._id);
       
       // Get detailed conversation data with user info
@@ -1773,6 +1830,8 @@ const routes = {
     const conversationId = request.params.conversationId;
 
     try {
+      await markDeliveredForUser(user._id);
+      await markConversationSeen(conversationId, user._id);
       const messages = await findConversationMessages(conversationId, 50);
       
       sendJson(response, 200, {
@@ -1961,6 +2020,7 @@ realtime.on('connection', (socket) => {
     lastSeenUsers.delete(String(userId));
     socket.join(String(userId));
     realtime.emit('presence:online', getPresencePayload(userId));
+    markDeliveredForUser(userId).catch(() => null);
   }
 
   socket.on('presence:query', ({ userIds = [] } = {}) => {

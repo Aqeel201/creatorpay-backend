@@ -75,6 +75,10 @@ const messageSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    deliveredAt: {
+      type: Date,
+      default: null,
+    },
     editedAt: {
       type: Date,
       default: null,
