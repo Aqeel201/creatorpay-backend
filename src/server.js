@@ -34,6 +34,7 @@ const {
   createGoogleUser,
   linkGoogleAccount,
   registerPushToken,
+  touchUserPresence,
   addUserSession,
   touchUserSession,
   removeUserSession,
@@ -556,9 +557,9 @@ const sendPushNotifications = async (tokens = [], { title, body, data = {} }) =>
   const uniqueTokens = [...new Set(tokens.filter(Boolean))];
   if (uniqueTokens.length === 0 || typeof fetch !== 'function') return;
 
-  await Promise.all(
-    uniqueTokens.map((to) =>
-      fetch('https://exp.host/--/api/v2/push/send', {
+  const results = await Promise.all(
+    uniqueTokens.map(async (to) => {
+      const response = await fetch('https://exp.host/--/api/v2/push/send', {
         method: 'POST',
         headers: {
           Accept: 'application/json',
@@ -570,11 +571,23 @@ const sendPushNotifications = async (tokens = [], { title, body, data = {} }) =>
           sound: 'default',
           title,
           body,
+          channelId: 'default',
           data,
         }),
-      }).catch(() => null)
-    )
+      }).catch((error) => ({ error }));
+
+      if (!response || response.error) {
+        return { to, ok: false, error: response?.error?.message || 'Network error' };
+      }
+
+      const payload = await response.json().catch(() => ({}));
+      return { to, ok: response.ok, payload };
+    })
   );
+
+  results
+    .filter((result) => !result.ok)
+    .forEach((result) => console.warn('Push notification failed:', result));
 };
 
 const notifyUser = async (userId, notification) => {
@@ -588,6 +601,16 @@ const getPresencePayload = (userId) => ({
   isOnline: connectedUsers.has(String(userId)),
   lastSeen: lastSeenUsers.get(String(userId)) || null,
 });
+
+const getPersistentPresence = (user) => {
+  const lastSeen = user?.lastSeenAt ? new Date(user.lastSeenAt) : null;
+  const isRecentlyActive = lastSeen && Date.now() - lastSeen.getTime() < 90 * 1000;
+
+  return {
+    isOnline: connectedUsers.has(user?._id?.toString?.()) || Boolean(isRecentlyActive),
+    lastSeen: lastSeen ? lastSeen.toISOString() : null,
+  };
+};
 
 const handleCreateReview = async (request, response, productIdFromRoute = null) => {
   const user = await requireAuth(request, { role: 'fan' });
@@ -1392,6 +1415,36 @@ const routes = {
     }
   },
 
+  'POST /api/presence/heartbeat': async (request, response) => {
+    const user = await requireAuth(request);
+    const updated = await touchUserPresence(user._id);
+
+    sendJson(response, 200, {
+      presence: {
+        userId: user._id.toString(),
+        ...getPersistentPresence(updated || user),
+      },
+    });
+  },
+
+  'GET /api/presence': async (request, response) => {
+    await requireAuth(request);
+    const url = new URL(request.url, `http://${request.headers.host}`);
+    const userIds = (url.searchParams.get('userIds') || '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean)
+      .slice(0, 50);
+
+    const users = await Promise.all(userIds.map((id) => findUserById(id).catch(() => null)));
+    sendJson(response, 200, {
+      users: users.filter(Boolean).map((profile) => ({
+        userId: profile._id.toString(),
+        ...getPersistentPresence(profile),
+      })),
+    });
+  },
+
   'GET /api/dashboard/creator': async (request, response) => {
     const user = await requireAuth(request, { role: 'creator' });
 
@@ -1790,6 +1843,7 @@ const routes = {
         conversations.map(async (conv) => {
           const otherUserId = conv.senderId.equals(user._id) ? conv.receiverId : conv.senderId;
           const otherUser = await findUserById(otherUserId);
+          const presence = getPersistentPresence(otherUser);
           
           // Count unread messages
           const unreadCount = await Message.countDocuments({
@@ -1806,8 +1860,8 @@ const routes = {
               fullName: otherUser.fullName,
               profileImageUrl: otherUser.profileImageUrl,
               role: otherUser.role,
-              isOnline: connectedUsers.has(otherUser._id.toString()),
-              lastSeen: lastSeenUsers.get(otherUser._id.toString()) || null,
+              isOnline: presence.isOnline,
+              lastSeen: presence.lastSeen,
             } : null,
             lastMessage: conv.lastMessage,
             lastMessageTime: conv.lastMessageTime,
@@ -2019,6 +2073,7 @@ realtime.on('connection', (socket) => {
     connectedUsers.set(String(userId), socket.id);
     lastSeenUsers.delete(String(userId));
     socket.join(String(userId));
+    touchUserPresence(userId).catch(() => null);
     realtime.emit('presence:online', getPresencePayload(userId));
     markDeliveredForUser(userId).catch(() => null);
   }
@@ -2046,6 +2101,7 @@ realtime.on('connection', (socket) => {
       connectedUsers.delete(String(userId));
       const lastSeen = new Date().toISOString();
       lastSeenUsers.set(String(userId), lastSeen);
+      touchUserPresence(userId, new Date(lastSeen)).catch(() => null);
       realtime.emit('presence:offline', getPresencePayload(userId));
     }
   });

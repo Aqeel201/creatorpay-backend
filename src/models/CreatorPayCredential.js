@@ -84,6 +84,10 @@ const creatorPayCredentialSchema = new mongoose.Schema(
         default: Date.now,
       },
     }],
+    lastSeenAt: {
+      type: Date,
+      default: null,
+    },
     sessions: [{
       sessionId: {
         type: String,

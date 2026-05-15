@@ -20,6 +20,7 @@ const sanitizeUser = (user) => ({
   profileImageUrl: user.profileImageUrl,
   isVerified: Boolean(user.isVerified),
   followersCount: Array.isArray(user.followers) ? user.followers.length : 0,
+  lastSeenAt: user.lastSeenAt,
   createdAt: user.createdAt,
 });
 
@@ -78,6 +79,13 @@ const registerPushToken = (userId, { token, platform }) =>
       },
       { new: true }
     )
+  );
+
+const touchUserPresence = (userId, lastSeenAt = new Date()) =>
+  CreatorPayCredential.findByIdAndUpdate(
+    userId,
+    { lastSeenAt },
+    { new: true }
   );
 
 const addUserSession = (userId, { sessionId, device, ip }) =>
@@ -553,6 +561,7 @@ module.exports = {
   createGoogleUser,
   linkGoogleAccount,
   registerPushToken,
+  touchUserPresence,
   addUserSession,
   touchUserSession,
   removeUserSession,
