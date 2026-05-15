@@ -358,8 +358,16 @@ const sendOtpEmail = async (email, otp, fullName) => {
   }
 };
 
-const getPublicBaseUrl = () =>
-  (process.env.APP_BASE_URL || process.env.PUBLIC_BASE_URL || 'https://creatorpay-backend.vercel.app').replace(/\/+$/, '');
+const getPublicBaseUrl = () => {
+  const configuredUrl = process.env.APP_BASE_URL || process.env.PUBLIC_BASE_URL || '';
+  const cleanUrl = configuredUrl.replace(/\/+$/, '');
+
+  if (cleanUrl && !/localhost|127\.0\.0\.1/i.test(cleanUrl)) {
+    return cleanUrl;
+  }
+
+  return 'https://creatorpay-backend.vercel.app';
+};
 
 const sendResetPasswordEmail = async (email, fullName, resetToken) => {
   try {
